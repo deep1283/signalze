@@ -1,0 +1,113 @@
+import { NextRequest, NextResponse } from "next/server"
+
+import { requireEntitledAuth } from "@/lib/server/authz"
+import { badRequest, toErrorResponse, tooManyRequests } from "@/lib/server/errors"
+import { getRequestIp, parseJsonBody } from "@/lib/server/request"
+import { takeRateLimit } from "@/lib/server/rate-limit"
+import {
+  insertBrand,
+  insertKeyword,
+  listBrands,
+  listKeywords,
+  patchProfile,
+  updateBrand,
+  updateKeyword,
+} from "@/lib/server/supabase"
+import { withSessionCookie } from "@/lib/server/session"
+import { assertPlanCounts, sanitizeStringList } from "@/lib/server/validation"
+
+type OnboardingBody = {
+  brands?: string[]
+  keywords?: string[]
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const auth = await requireEntitledAuth(request)
+    const ip = getRequestIp(request)
+    const rate = takeRateLimit(`onboarding:setup:${auth.userId}:${ip}`, 20, 60_000)
+    if (!rate.allowed) {
+      throw tooManyRequests()
+    }
+
+    const body = await parseJsonBody<OnboardingBody>(request)
+    const brands = sanitizeStringList(body.brands, 40, 80)
+    const keywords = sanitizeStringList(body.keywords, 80, 120)
+
+    if (!brands.length || !keywords.length) {
+      throw badRequest("Add at least one brand and one keyword.")
+    }
+
+    const profile = auth.profile
+
+    assertPlanCounts(profile.plan_tier, brands, keywords)
+
+    const existingBrands = await listBrands(auth.accessToken, auth.userId, true)
+    const existingKeywords = await listKeywords(auth.accessToken, auth.userId, true, false)
+
+    const brandByLower = new Map(existingBrands.map((brand) => [brand.name.toLowerCase(), brand]))
+    const keywordByLower = new Map(existingKeywords.map((keyword) => [keyword.query.toLowerCase(), keyword]))
+
+    for (const brand of brands) {
+      const existing = brandByLower.get(brand.toLowerCase())
+      if (!existing) {
+        await insertBrand(auth.accessToken, auth.userId, brand)
+        continue
+      }
+
+      if (!existing.is_active || existing.name !== brand) {
+        await updateBrand(auth.accessToken, auth.userId, existing.id, {
+          is_active: true,
+          name: brand,
+        })
+      }
+    }
+
+    for (const existing of existingBrands) {
+      if (!existing.is_active) {
+        continue
+      }
+      if (!brands.some((name) => name.toLowerCase() === existing.name.toLowerCase())) {
+        await updateBrand(auth.accessToken, auth.userId, existing.id, {
+          is_active: false,
+        })
+      }
+    }
+
+    for (const keyword of keywords) {
+      const existing = keywordByLower.get(keyword.toLowerCase())
+      if (!existing) {
+        await insertKeyword(auth.accessToken, auth.userId, keyword)
+        continue
+      }
+
+      if (!existing.is_active || existing.query !== keyword) {
+        await updateKeyword(auth.accessToken, auth.userId, existing.id, {
+          is_active: true,
+          query: keyword,
+        })
+      }
+    }
+
+    for (const existing of existingKeywords) {
+      if (!existing.is_active) {
+        continue
+      }
+      if (!keywords.some((item) => item.toLowerCase() === existing.query.toLowerCase())) {
+        await updateKeyword(auth.accessToken, auth.userId, existing.id, {
+          is_active: false,
+        })
+      }
+    }
+
+    await patchProfile(auth.accessToken, auth.userId, { onboarding_completed: true })
+
+    const response = NextResponse.json({
+      ok: true,
+      nextRoute: "/dashboard",
+    })
+    return withSessionCookie(response, auth.sessionResult)
+  } catch (error) {
+    return toErrorResponse("api/onboarding/setup", error, "Unable to save onboarding.")
+  }
+}

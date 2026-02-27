@@ -1,0 +1,320 @@
+import { AppError } from "@/lib/server/errors"
+import { getSupabaseEnv } from "@/lib/server/env"
+
+export type PlanTier = "starter_9" | "growth_15"
+export type BillingMode = "trial" | "paid"
+
+type AuthResponse = {
+  access_token?: string
+  refresh_token?: string
+  expires_in?: number
+  user?: {
+    id: string
+    email?: string
+  }
+  error_description?: string
+  msg?: string
+}
+
+export type ServerSession = {
+  accessToken: string
+  refreshToken: string
+  expiresAt: number
+  user: {
+    id: string
+    email?: string
+  }
+}
+
+export type ProfileRow = {
+  id: string
+  email: string | null
+  plan_tier: PlanTier
+  billing_mode: BillingMode | null
+  plan_selected_at: string | null
+  trial_started_at: string | null
+  trial_ends_at: string | null
+  onboarding_completed: boolean
+}
+
+export type BrandRow = {
+  id: string
+  name: string
+  is_active: boolean
+}
+
+export type KeywordRow = {
+  id: string
+  query: string
+  is_active: boolean
+  is_system: boolean
+}
+
+function baseHeaders(accessToken?: string): Record<string, string> {
+  const { supabaseAnonKey } = getSupabaseEnv()
+  return {
+    apikey: supabaseAnonKey,
+    Authorization: `Bearer ${accessToken ?? supabaseAnonKey}`,
+    "Content-Type": "application/json",
+  }
+}
+
+function buildSession(payload: AuthResponse): ServerSession {
+  if (!payload.access_token || !payload.refresh_token || !payload.user?.id) {
+    throw new AppError(401, "Authentication failed.", "Auth response missing session fields.")
+  }
+
+  return {
+    accessToken: payload.access_token,
+    refreshToken: payload.refresh_token,
+    expiresAt: Date.now() + (payload.expires_in ?? 3600) * 1000,
+    user: {
+      id: payload.user.id,
+      email: payload.user.email,
+    },
+  }
+}
+
+async function authRequest(path: string, init: RequestInit): Promise<AuthResponse> {
+  const { supabaseUrl } = getSupabaseEnv()
+  const response = await fetch(`${supabaseUrl}/auth/v1${path}`, {
+    ...init,
+    headers: {
+      ...baseHeaders(),
+      ...(init.headers ?? {}),
+    },
+    cache: "no-store",
+  })
+
+  const payload = (await response.json().catch(() => ({}))) as AuthResponse
+  if (!response.ok) {
+    throw new AppError(401, "Authentication failed.", payload.error_description ?? payload.msg ?? "Supabase auth error")
+  }
+
+  return payload
+}
+
+type SupabaseErrorPayload = {
+  message?: string
+  error?: string
+}
+
+export async function restRequest<T>(path: string, accessToken: string, init?: RequestInit): Promise<T> {
+  const { supabaseUrl } = getSupabaseEnv()
+  const method = (init?.method ?? "GET").toUpperCase()
+  const headers = new Headers(baseHeaders(accessToken))
+
+  if (init?.headers) {
+    const incoming = new Headers(init.headers)
+    incoming.forEach((value, key) => headers.set(key, value))
+  }
+
+  if (method !== "GET" && method !== "HEAD" && !headers.has("Prefer")) {
+    headers.set("Prefer", "return=representation")
+  }
+
+  const response = await fetch(`${supabaseUrl}/rest/v1${path}`, {
+    ...init,
+    headers,
+    cache: "no-store",
+  })
+
+  const payload = (await response.json().catch(() => null)) as SupabaseErrorPayload | T | null
+  if (!response.ok) {
+    const details =
+      payload && typeof payload === "object"
+        ? "message" in payload
+          ? payload.message
+          : "error" in payload
+            ? payload.error
+            : undefined
+        : undefined
+
+    throw new AppError(400, "Request could not be completed.", details ?? `Supabase REST status ${response.status}`)
+  }
+
+  return payload as T
+}
+
+export async function signInWithPassword(email: string, password: string): Promise<ServerSession> {
+  const payload = await authRequest("/token?grant_type=password", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  })
+  return buildSession(payload)
+}
+
+export async function signUpWithPassword(email: string, password: string): Promise<ServerSession> {
+  const payload = await authRequest("/signup", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  })
+
+  if (!payload.access_token || !payload.refresh_token || !payload.user) {
+    throw new AppError(
+      400,
+      "Account created. Please verify your email before signing in.",
+      "Signup requires email confirmation.",
+    )
+  }
+
+  return buildSession(payload)
+}
+
+export async function refreshSession(refreshToken: string): Promise<ServerSession> {
+  const payload = await authRequest("/token?grant_type=refresh_token", {
+    method: "POST",
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  })
+  return buildSession(payload)
+}
+
+export async function getAuthUser(accessToken: string): Promise<{ id: string; email?: string }> {
+  const { supabaseUrl } = getSupabaseEnv()
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    method: "GET",
+    headers: baseHeaders(accessToken),
+    cache: "no-store",
+  })
+
+  const payload = (await response.json().catch(() => null)) as { id?: string; email?: string } | null
+  if (!response.ok || !payload?.id) {
+    throw new AppError(401, "Authentication failed.", "Unable to resolve auth user.")
+  }
+
+  return {
+    id: payload.id,
+    email: payload.email,
+  }
+}
+
+export async function getProfile(accessToken: string, userId: string): Promise<ProfileRow | null> {
+  const rows = await restRequest<ProfileRow[]>(
+    `/profiles?id=eq.${encodeURIComponent(
+      userId,
+    )}&select=id,email,plan_tier,billing_mode,plan_selected_at,trial_started_at,trial_ends_at,onboarding_completed`,
+    accessToken,
+  )
+  return rows[0] ?? null
+}
+
+export async function ensureProfile(accessToken: string, userId: string, email?: string): Promise<ProfileRow> {
+  const existing = await getProfile(accessToken, userId)
+  if (existing) {
+    return existing
+  }
+
+  await restRequest<ProfileRow[]>(`/profiles`, accessToken, {
+    method: "POST",
+    body: JSON.stringify([{ id: userId, email: email ?? null }]),
+  })
+
+  const created = await getProfile(accessToken, userId)
+  if (!created) {
+    throw new AppError(500, "Unable to initialize profile.", "Profile insert did not return a row.")
+  }
+  return created
+}
+
+export async function patchProfile(
+  accessToken: string,
+  userId: string,
+  patch: Partial<ProfileRow> & Record<string, unknown>,
+): Promise<ProfileRow> {
+  const rows = await restRequest<ProfileRow[]>(`/profiles?id=eq.${encodeURIComponent(userId)}`, accessToken, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  })
+
+  if (!rows[0]) {
+    throw new AppError(400, "Profile update failed.")
+  }
+
+  return rows[0]
+}
+
+export async function listBrands(accessToken: string, userId: string, includeInactive = false): Promise<BrandRow[]> {
+  const activeFilter = includeInactive ? "" : "&is_active=is.true"
+  return restRequest<BrandRow[]>(
+    `/brands?user_id=eq.${encodeURIComponent(userId)}${activeFilter}&select=id,name,is_active&order=created_at.asc`,
+    accessToken,
+  )
+}
+
+export async function insertBrand(accessToken: string, userId: string, name: string): Promise<BrandRow> {
+  const rows = await restRequest<BrandRow[]>(`/brands`, accessToken, {
+    method: "POST",
+    body: JSON.stringify([{ user_id: userId, name, is_active: true }]),
+  })
+  if (!rows[0]) {
+    throw new AppError(400, "Failed to create brand.")
+  }
+  return rows[0]
+}
+
+export async function updateBrand(
+  accessToken: string,
+  userId: string,
+  brandId: string,
+  patch: Partial<BrandRow>,
+): Promise<BrandRow> {
+  const rows = await restRequest<BrandRow[]>(
+    `/brands?id=eq.${encodeURIComponent(brandId)}&user_id=eq.${encodeURIComponent(userId)}`,
+    accessToken,
+    {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    },
+  )
+  if (!rows[0]) {
+    throw new AppError(404, "Brand not found.")
+  }
+  return rows[0]
+}
+
+export async function listKeywords(
+  accessToken: string,
+  userId: string,
+  includeInactive = false,
+  includeSystem = false,
+): Promise<KeywordRow[]> {
+  const activeFilter = includeInactive ? "" : "&is_active=is.true"
+  const systemFilter = includeSystem ? "" : "&is_system=is.false"
+  return restRequest<KeywordRow[]>(
+    `/keywords?user_id=eq.${encodeURIComponent(
+      userId,
+    )}${systemFilter}${activeFilter}&select=id,query,is_active,is_system&order=created_at.asc`,
+    accessToken,
+  )
+}
+
+export async function insertKeyword(accessToken: string, userId: string, query: string): Promise<KeywordRow> {
+  const rows = await restRequest<KeywordRow[]>(`/keywords`, accessToken, {
+    method: "POST",
+    body: JSON.stringify([{ user_id: userId, query, is_active: true, is_system: false }]),
+  })
+  if (!rows[0]) {
+    throw new AppError(400, "Failed to create keyword.")
+  }
+  return rows[0]
+}
+
+export async function updateKeyword(
+  accessToken: string,
+  userId: string,
+  keywordId: string,
+  patch: Partial<KeywordRow>,
+): Promise<KeywordRow> {
+  const rows = await restRequest<KeywordRow[]>(
+    `/keywords?id=eq.${encodeURIComponent(keywordId)}&user_id=eq.${encodeURIComponent(userId)}`,
+    accessToken,
+    {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    },
+  )
+  if (!rows[0]) {
+    throw new AppError(404, "Keyword not found.")
+  }
+  return rows[0]
+}

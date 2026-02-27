@@ -1,0 +1,212 @@
+export type PlanTier = "starter_9" | "growth_15"
+export type BillingMode = "trial" | "paid"
+
+type Nullable<T> = T | null
+
+export type SessionData = {
+  user: {
+    id: string
+    email?: string
+  }
+}
+
+export type ProfileRow = {
+  id: string
+  email: Nullable<string>
+  plan_tier: PlanTier
+  billing_mode: Nullable<BillingMode>
+  plan_selected_at: Nullable<string>
+  trial_started_at: Nullable<string>
+  trial_ends_at: Nullable<string>
+  onboarding_completed: boolean
+}
+
+export type BrandRow = {
+  id: string
+  name: string
+  is_active: boolean
+}
+
+export type KeywordRow = {
+  id: string
+  query: string
+  is_active: boolean
+  is_system: boolean
+}
+
+type SessionPayload = {
+  user: SessionData["user"]
+  profile: ProfileRow
+  nextRoute: string
+}
+
+async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+    credentials: "include",
+  })
+
+  const payload = (await response.json().catch(() => null)) as { error?: string } | T | null
+  if (!response.ok) {
+    const message = payload && typeof payload === "object" && "error" in payload ? payload.error : undefined
+    throw new Error(message ?? "Request failed.")
+  }
+
+  return payload as T
+}
+
+export function clearStoredSession() {
+  void fetch("/api/auth/logout", {
+    method: "POST",
+    credentials: "include",
+    keepalive: true,
+  }).catch(() => undefined)
+}
+
+export function getStoredSession(): SessionData | null {
+  return null
+}
+
+export async function getValidSession(): Promise<SessionData | null> {
+  const payload = await fetch("/api/auth/session", {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
+
+  if (payload.status === 401) {
+    return null
+  }
+
+  if (!payload.ok) {
+    throw new Error("Unable to load session.")
+  }
+
+  const data = (await payload.json()) as SessionPayload
+  return { user: data.user }
+}
+
+export async function signInWithPassword(email: string, password: string): Promise<SessionData> {
+  const payload = await apiRequest<SessionPayload>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({
+      mode: "signin",
+      email,
+      password,
+    }),
+  })
+  return { user: payload.user }
+}
+
+export async function signUpWithPassword(email: string, password: string): Promise<SessionData> {
+  const payload = await apiRequest<SessionPayload>("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify({
+      mode: "signup",
+      email,
+      password,
+    }),
+  })
+  return { user: payload.user }
+}
+
+export async function getProfile(_: SessionData): Promise<ProfileRow | null> {
+  const payload = await apiRequest<SessionPayload>("/api/auth/session", { method: "GET" })
+  return payload.profile ?? null
+}
+
+export async function ensureProfile(session: SessionData): Promise<ProfileRow> {
+  const profile = await getProfile(session)
+  if (!profile) {
+    throw new Error("Unable to load profile.")
+  }
+  return profile
+}
+
+export async function updateProfile(
+  _session: SessionData,
+  patch: Partial<ProfileRow> & Record<string, unknown>,
+): Promise<ProfileRow | null> {
+  const payload = await apiRequest<{ profile: ProfileRow }>("/api/profile", {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  })
+  return payload.profile
+}
+
+export async function listBrands(_session: SessionData, includeInactive = false): Promise<BrandRow[]> {
+  const payload = await apiRequest<{ brands: BrandRow[] }>(
+    `/api/tracking/brands?includeInactive=${includeInactive ? "true" : "false"}`,
+    { method: "GET" },
+  )
+  return payload.brands
+}
+
+export async function insertBrand(_session: SessionData, name: string): Promise<BrandRow> {
+  const payload = await apiRequest<{ brand: BrandRow }>("/api/tracking/brands", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  })
+  return payload.brand
+}
+
+export async function updateBrand(_session: SessionData, brandId: string, patch: Partial<BrandRow>): Promise<BrandRow | null> {
+  const payload = await apiRequest<{ brand: BrandRow }>("/api/tracking/brands", {
+    method: "PATCH",
+    body: JSON.stringify({
+      id: brandId,
+      name: patch.name,
+      isActive: patch.is_active,
+    }),
+  })
+  return payload.brand
+}
+
+export async function listKeywords(_session: SessionData, includeInactive = false): Promise<KeywordRow[]> {
+  const payload = await apiRequest<{ keywords: KeywordRow[] }>(
+    `/api/tracking/keywords?includeInactive=${includeInactive ? "true" : "false"}`,
+    { method: "GET" },
+  )
+  return payload.keywords
+}
+
+export async function insertKeyword(_session: SessionData, query: string): Promise<KeywordRow> {
+  const payload = await apiRequest<{ keyword: KeywordRow }>("/api/tracking/keywords", {
+    method: "POST",
+    body: JSON.stringify({ query }),
+  })
+  return payload.keyword
+}
+
+export async function updateKeyword(
+  _session: SessionData,
+  keywordId: string,
+  patch: Partial<KeywordRow>,
+): Promise<KeywordRow | null> {
+  const payload = await apiRequest<{ keyword: KeywordRow }>("/api/tracking/keywords", {
+    method: "PATCH",
+    body: JSON.stringify({
+      id: keywordId,
+      query: patch.query,
+      isActive: patch.is_active,
+    }),
+  })
+  return payload.keyword
+}
+
+export async function syncTrackingSetup(_session: SessionData, brandNames: string[], keywordValues: string[]) {
+  await apiRequest<{ ok: boolean }>("/api/onboarding/setup", {
+    method: "POST",
+    body: JSON.stringify({
+      brands: brandNames,
+      keywords: keywordValues,
+    }),
+  })
+}
+

@@ -5,7 +5,7 @@ const useCases = [
     badge: "For startup founders",
     title: "Startups",
     description:
-      "Get notified the moment someone drops your name on HN or Reddit. Respond fast, build relationships, and turn organic mentions into customers.",
+      "Get notified the moment someone drops your name on Hacker News, Dev.to, or GitHub Discussions. Respond fast and turn organic mentions into customers.",
     image: "/images/usecase-indie.jpg",
     imageAlt: "A startup founder checking brand mention notifications",
     reverse: false,
@@ -14,7 +14,7 @@ const useCases = [
     badge: "For marketing teams",
     title: "Marketing teams",
     description:
-      "Track campaign reach across communities. See which subreddits are talking about your product, analyze sentiment, and measure share-of-voice against competitors.",
+      "Track campaign reach across communities. See where your product is discussed, analyze momentum, and measure share-of-voice against competitors.",
     image: "/images/usecase-business.jpg",
     imageAlt: "A marketing manager analyzing brand data on screen",
     reverse: true,
@@ -23,7 +23,7 @@ const useCases = [
     badge: "For developer advocates",
     title: "DevRel & community",
     description:
-      "Stay on top of technical discussions, support requests, and product feedback shared across Hacker News threads and Reddit posts.",
+      "Stay on top of technical discussions, support requests, and product feedback across Hacker News, Dev.to, and GitHub Discussions.",
     image: "/images/usecase-team.jpg",
     imageAlt: "A team reviewing community data on a large display",
     reverse: false,

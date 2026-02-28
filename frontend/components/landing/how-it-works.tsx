@@ -20,7 +20,7 @@ export function HowItWorks() {
             Set up tracking in seconds
           </h2>
           <p className="max-w-md leading-relaxed text-muted-foreground">
-            Add your brand name, product, or any keyword. We scan Hacker News and Reddit around the clock so you never miss a conversation.
+            Add your brand name, product, or any keyword. We scan Hacker News, Dev.to, and GitHub Discussions so you never miss a conversation.
           </p>
           <Link
             href="/login"
@@ -29,10 +29,7 @@ export function HowItWorks() {
             Get started now <ArrowRight className="h-4 w-4" />
           </Link>
           <p className="text-sm text-muted-foreground">
-            Are you a startup?{" "}
-            <a href="#" className="underline underline-offset-4 hover:text-foreground">
-              Get the free plan forever
-            </a>
+            Start with a 2-day free trial on either plan.
           </p>
         </div>
       </div>

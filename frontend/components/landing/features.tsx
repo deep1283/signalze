@@ -14,12 +14,12 @@ const features = [
   {
     icon: Zap,
     title: "Real-time tracking",
-    description: "Mentions are captured within minutes of being posted on HN or Reddit.",
+    description: "Mentions are captured from Hacker News, Dev.to, and GitHub Discussions.",
   },
   {
     icon: Globe,
     title: "Keyword monitoring",
-    description: "Track your brand, competitors, or any keyword across multiple subreddits.",
+    description: "Track your brand, competitors, or any keyword across developer communities.",
   },
   {
     icon: Shield,

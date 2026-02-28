@@ -11,13 +11,13 @@ export function CTAFooter() {
               Start tracking your brand today
             </h2>
             <p className="mx-auto mt-4 max-w-md text-primary-foreground/80">
-              Join hundreds of teams using Mention to stay on top of every Hacker News and Reddit conversation about their brand.
+              Join teams using Mention to stay on top of every Hacker News, Dev.to, and GitHub Discussions conversation about their brand.
             </p>
             <Link
               href="/login"
               className="mt-8 inline-flex items-center gap-2 rounded-full bg-accent px-8 py-3.5 text-sm font-semibold text-accent-foreground transition-all hover:brightness-95"
             >
-              Get started for free <ArrowRight className="h-4 w-4" />
+              Start 2-day trial <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
         </div>

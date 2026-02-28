@@ -11,7 +11,7 @@ export function Hero() {
             Your brand, tracked everywhere
           </h1>
           <p className="max-w-md text-lg leading-relaxed text-muted-foreground">
-            Never miss a mention on Hacker News or Reddit. Get real-time alerts, sentiment analysis, and actionable insights.
+            Never miss a mention on Hacker News, Dev.to, or GitHub Discussions. Get real-time alerts and actionable insights.
           </p>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
             <Link
@@ -39,7 +39,7 @@ export function Hero() {
           <div className="relative z-10">
             <Image
               src="/images/hero-phone.jpg"
-              alt="Mention app dashboard showing brand mentions from Hacker News and Reddit"
+              alt="Mention app dashboard showing brand mentions from Hacker News, Dev.to, and GitHub Discussions"
               width={380}
               height={600}
               className="rounded-3xl shadow-2xl"
@@ -53,7 +53,7 @@ export function Hero() {
               Sentiment analysis
             </div>
             <div className="absolute -right-2 bottom-20 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-card-foreground shadow-lg md:-right-10">
-              HN & Reddit
+              HN + Dev.to + GitHub
             </div>
           </div>
         </div>

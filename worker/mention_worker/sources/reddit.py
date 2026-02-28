@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -27,7 +27,7 @@ class RedditSource:
         self._token_expires_at: datetime | None = None
 
     def _access_token(self) -> str:
-        now = datetime.now(tz=UTC)
+        now = datetime.now(tz=timezone.utc)
         if self._token and self._token_expires_at and now < self._token_expires_at:
             return self._token
 
@@ -80,7 +80,7 @@ class RedditSource:
             if created_utc is None:
                 continue
 
-            published_at = datetime.fromtimestamp(float(created_utc), tz=UTC)
+            published_at = datetime.fromtimestamp(float(created_utc), tz=timezone.utc)
             if published_at < since:
                 continue
 

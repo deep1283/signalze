@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import httpx
 
@@ -38,7 +38,7 @@ class DevToSource:
             try:
                 published_at = datetime.fromisoformat(str(published_raw).replace("Z", "+00:00"))
             except Exception:
-                published_at = datetime.now(tz=UTC)
+                published_at = datetime.now(tz=timezone.utc)
 
             if published_at < since:
                 continue

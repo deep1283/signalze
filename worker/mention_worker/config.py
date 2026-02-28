@@ -5,11 +5,14 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from mention_worker.sources.registry import SOURCE_DEFINITIONS
 
-@dataclass(slots=True)
+
+@dataclass
 class Settings:
     database_url: str
     worker_lock_key: int
+    free_tier_mode: bool
     poll_interval_minutes: int
     overlap_minutes: int
     per_source_limit: int
@@ -18,20 +21,46 @@ class Settings:
     max_alert_retries: int
     retry_base_seconds: int
     retry_max_seconds: int
-    reddit_enabled: bool
-    hn_enabled: bool
-    devto_enabled: bool
     reddit_client_id: str | None
     reddit_client_secret: str | None
     reddit_user_agent: str
     devto_top_days: int
+    google_api_key: str | None
+    google_cse_id: str | None
+    brave_api_key: str | None
+    github_token: str | None
     request_timeout_seconds: float
+    source_keys: tuple[str, ...]
+    source_enabled: dict[str, bool]
+    source_poll_interval_minutes: dict[str, int]
+    source_daily_request_limit: dict[str, int | None]
+
+    def is_source_enabled(self, source: str) -> bool:
+        return bool(self.source_enabled.get(source, False))
+
+    def poll_interval_for_source(self, source: str) -> int:
+        return int(self.source_poll_interval_minutes.get(source, self.poll_interval_minutes))
+
+    def daily_request_limit_for_source(self, source: str) -> int | None:
+        return self.source_daily_request_limit.get(source)
 
 
 def _to_bool(value: str | None, *, default: bool) -> bool:
     if value is None:
         return default
     return value.lower() in {"1", "true", "yes", "on"}
+
+
+def _to_optional_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    parsed = int(stripped)
+    if parsed < 1:
+        return None
+    return parsed
 
 
 def load_settings() -> Settings:
@@ -47,10 +76,39 @@ def load_settings() -> Settings:
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
 
+    free_tier_mode = _to_bool(os.getenv("FREE_TIER_MODE"), default=True)
+    poll_interval_minutes = int(os.getenv("POLL_INTERVAL_MINUTES", "15"))
+
+    source_enabled: dict[str, bool] = {}
+    source_poll_interval_minutes: dict[str, int] = {}
+    source_daily_request_limit: dict[str, int | None] = {}
+
+    for source in SOURCE_DEFINITIONS:
+        enabled = _to_bool(
+            os.getenv(f"SOURCE_{source.env_slug}_ENABLED"),
+            default=source.default_enabled,
+        )
+        poll_minutes = int(
+            os.getenv(
+                f"SOURCE_{source.env_slug}_POLL_INTERVAL_MINUTES",
+                str(poll_interval_minutes),
+            )
+        )
+        daily_limit = _to_optional_int(
+            os.getenv(f"SOURCE_{source.env_slug}_DAILY_REQUEST_LIMIT")
+        )
+        if free_tier_mode and daily_limit is None:
+            daily_limit = source.free_tier_daily_limit
+
+        source_enabled[source.key] = enabled
+        source_poll_interval_minutes[source.key] = max(poll_minutes, 1)
+        source_daily_request_limit[source.key] = daily_limit
+
     return Settings(
         database_url=database_url,
         worker_lock_key=int(os.getenv("WORKER_LOCK_KEY", "84521791")),
-        poll_interval_minutes=int(os.getenv("POLL_INTERVAL_MINUTES", "15")),
+        free_tier_mode=free_tier_mode,
+        poll_interval_minutes=poll_interval_minutes,
         overlap_minutes=int(os.getenv("SOURCE_OVERLAP_MINUTES", "3")),
         per_source_limit=int(os.getenv("PER_SOURCE_RESULT_LIMIT", "40")),
         source_task_batch_size=int(os.getenv("SOURCE_TASK_BATCH_SIZE", "300")),
@@ -58,12 +116,17 @@ def load_settings() -> Settings:
         max_alert_retries=int(os.getenv("MAX_ALERT_RETRIES", "3")),
         retry_base_seconds=int(os.getenv("ALERT_RETRY_BASE_SECONDS", "60")),
         retry_max_seconds=int(os.getenv("ALERT_RETRY_MAX_SECONDS", "1800")),
-        reddit_enabled=_to_bool(os.getenv("SOURCE_REDDIT_ENABLED"), default=True),
-        hn_enabled=_to_bool(os.getenv("SOURCE_HN_ENABLED"), default=True),
-        devto_enabled=_to_bool(os.getenv("SOURCE_DEVTO_ENABLED"), default=False),
         reddit_client_id=os.getenv("REDDIT_CLIENT_ID"),
         reddit_client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
         reddit_user_agent=os.getenv("REDDIT_USER_AGENT", "mention-worker/1.0"),
         devto_top_days=int(os.getenv("DEVTO_TOP_DAYS", "7")),
+        google_api_key=os.getenv("GOOGLE_API_KEY"),
+        google_cse_id=os.getenv("GOOGLE_CSE_ID"),
+        brave_api_key=os.getenv("BRAVE_API_KEY"),
+        github_token=os.getenv("GITHUB_TOKEN"),
         request_timeout_seconds=float(os.getenv("REQUEST_TIMEOUT_SECONDS", "20")),
+        source_keys=tuple(source.key for source in SOURCE_DEFINITIONS),
+        source_enabled=source_enabled,
+        source_poll_interval_minutes=source_poll_interval_minutes,
+        source_daily_request_limit=source_daily_request_limit,
     )

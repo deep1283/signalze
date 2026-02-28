@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import traceback
+from typing import Any
 
 import httpx
 
 from mention_worker.config import Settings
 from mention_worker.db import Database
 from mention_worker.slack import send_slack_alert
-from mention_worker.sources.devto import DevToSource
-from mention_worker.sources.hackernews import HackerNewsSource
-from mention_worker.sources.reddit import RedditSource
+from mention_worker.sources.registry import SOURCE_DEFINITIONS
 
 
 class Worker:
@@ -20,7 +19,7 @@ class Worker:
         self.db = Database(settings.database_url)
 
     def run_once(self) -> int:
-        stats: dict[str, int] = defaultdict(int)
+        stats: dict[str, Any] = defaultdict(int)
 
         with self.db.connection() as conn:
             if not self.db.try_advisory_lock(conn, self.settings.worker_lock_key):
@@ -31,10 +30,25 @@ class Worker:
             print(f"{{\"event\":\"worker_start\",\"run_id\":\"{run_id}\"}}")
 
             try:
+                source_requests_today = self.db.fetch_today_source_requests(
+                    conn,
+                    source_keys=self.settings.source_keys,
+                )
+                source_requests_run: dict[str, int] = defaultdict(int)
+
                 with httpx.Client(timeout=self.settings.request_timeout_seconds) as http_client:
                     sources = self._build_sources(http_client)
-                    self._process_source_tasks(conn, sources, stats)
+                    self._process_source_tasks(
+                        conn,
+                        sources,
+                        stats,
+                        source_requests_run=source_requests_run,
+                        source_requests_today=source_requests_today,
+                    )
                     self._process_alerts(conn, http_client, stats)
+
+                stats["source_requests"] = dict(source_requests_run)
+                stats["source_requests_today_after"] = dict(source_requests_today)
 
                 self.db.finish_worker_run(conn, run_id=run_id, status="success", stats=dict(stats))
                 print(
@@ -59,24 +73,25 @@ class Worker:
     def _build_sources(self, http_client: httpx.Client) -> dict[str, object]:
         sources: dict[str, object] = {}
 
-        if self.settings.hn_enabled:
-            sources["hackernews"] = HackerNewsSource(http_client)
+        for definition in SOURCE_DEFINITIONS:
+            if not self.settings.is_source_enabled(definition.key):
+                continue
 
-        if self.settings.reddit_enabled:
-            if self.settings.reddit_client_id and self.settings.reddit_client_secret:
-                sources["reddit"] = RedditSource(
-                    client=http_client,
-                    client_id=self.settings.reddit_client_id,
-                    client_secret=self.settings.reddit_client_secret,
-                    user_agent=self.settings.reddit_user_agent,
-                )
-            else:
+            if definition.builder is None:
                 print(
-                    "{\"event\":\"source_disabled\",\"source\":\"reddit\",\"reason\":\"missing_credentials\"}"
+                    f"{{\"event\":\"source_disabled\",\"source\":\"{definition.key}\",\"reason\":\"unsupported_adapter\"}}"
                 )
+                continue
 
-        if self.settings.devto_enabled:
-            sources["devto"] = DevToSource(http_client, top_days=self.settings.devto_top_days)
+            source_client, reason = definition.builder(http_client, self.settings)
+            if source_client is None:
+                disabled_reason = reason or "missing_credentials"
+                print(
+                    f"{{\"event\":\"source_disabled\",\"source\":\"{definition.key}\",\"reason\":\"{disabled_reason}\"}}"
+                )
+                continue
+
+            sources[definition.key] = source_client
 
         return sources
 
@@ -84,7 +99,10 @@ class Worker:
         self,
         conn,
         sources: dict[str, object],
-        stats: dict[str, int],
+        stats: dict[str, Any],
+        *,
+        source_requests_run: dict[str, int],
+        source_requests_today: dict[str, int],
     ) -> None:
         enabled_sources = tuple(sorted(sources.keys()))
         tasks = self.db.fetch_due_source_tasks(
@@ -107,13 +125,27 @@ class Worker:
                 stats["task_errors"] += 1
                 continue
 
-            now = datetime.now(tz=UTC)
+            if self._source_daily_limit_reached(task.source, source_requests_today):
+                now = datetime.now(tz=timezone.utc)
+                self.db.mark_source_task_error(
+                    conn,
+                    keyword_id=task.keyword_id,
+                    source=task.source,
+                    error="Daily source request budget reached; deferred until UTC day rollover",
+                    backoff_minutes=self._minutes_until_utc_day_rollover(now),
+                )
+                stats["tasks_deferred_budget"] += 1
+                continue
+
+            now = datetime.now(tz=timezone.utc)
             default_since = now - timedelta(days=1)
             since = task.last_checked_at or default_since
             since = since - timedelta(minutes=max(self.settings.overlap_minutes, 0))
 
             try:
                 mentions = source_client.search(task.query, since=since, limit=self.settings.per_source_limit)
+                source_requests_today[task.source] = source_requests_today.get(task.source, 0) + 1
+                source_requests_run[task.source] = source_requests_run.get(task.source, 0) + 1
                 stats["source_mentions_fetched"] += len(mentions)
 
                 for mention in mentions:
@@ -149,7 +181,7 @@ class Worker:
                     keyword_id=task.keyword_id,
                     source=task.source,
                     checked_at=now,
-                    poll_interval_minutes=self.settings.poll_interval_minutes,
+                    poll_interval_minutes=self._poll_interval_for_source(task.source),
                 )
                 stats["tasks_succeeded"] += 1
             except Exception as exc:  # noqa: BLE001
@@ -159,11 +191,11 @@ class Worker:
                     keyword_id=task.keyword_id,
                     source=task.source,
                     error=str(exc),
-                    backoff_minutes=self.settings.poll_interval_minutes,
+                    backoff_minutes=self._poll_interval_for_source(task.source),
                 )
                 stats["task_errors"] += 1
 
-    def _process_alerts(self, conn, http_client: httpx.Client, stats: dict[str, int]) -> None:
+    def _process_alerts(self, conn, http_client: httpx.Client, stats: dict[str, Any]) -> None:
         alerts = self.db.fetch_pending_alerts(
             conn,
             limit=self.settings.alert_batch_size,
@@ -179,7 +211,8 @@ class Worker:
                     alert_id=alert.alert_id,
                     retry_count=next_retry,
                     max_retries=self.settings.max_alert_retries,
-                    next_attempt_at=datetime.now(tz=UTC) + timedelta(seconds=self._retry_delay_seconds(next_retry)),
+                    next_attempt_at=datetime.now(tz=timezone.utc)
+                    + timedelta(seconds=self._retry_delay_seconds(next_retry)),
                     error="Slack webhook missing or invalid",
                 )
                 stats["alerts_failed"] += 1
@@ -196,7 +229,7 @@ class Worker:
                     alert_id=alert.alert_id,
                     retry_count=next_retry,
                     max_retries=self.settings.max_alert_retries,
-                    next_attempt_at=datetime.now(tz=UTC)
+                    next_attempt_at=datetime.now(tz=timezone.utc)
                     + timedelta(seconds=self._retry_delay_seconds(next_retry)),
                     error=str(exc),
                 )
@@ -206,3 +239,18 @@ class Worker:
         exponent = max(retry_count - 1, 0)
         delay = self.settings.retry_base_seconds * (2**exponent)
         return min(delay, self.settings.retry_max_seconds)
+
+    def _poll_interval_for_source(self, source: str) -> int:
+        return self.settings.poll_interval_for_source(source)
+
+    def _source_daily_limit_reached(self, source: str, source_requests_today: dict[str, int]) -> bool:
+        limit = self.settings.daily_request_limit_for_source(source)
+        if limit is None:
+            return False
+        return source_requests_today.get(source, 0) >= limit
+
+    @staticmethod
+    def _minutes_until_utc_day_rollover(now: datetime) -> int:
+        next_day = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        delta = next_day - now
+        return max(int(delta.total_seconds() // 60), 1)

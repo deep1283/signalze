@@ -1,6 +1,13 @@
 # Mention Tracker Worker (Railway)
 
-This worker polls Reddit, Hacker News, and optionally Dev.to for active tracking queries, deduplicates mentions, and sends Slack webhook alerts.
+This worker polls Hacker News, GitHub Discussions, and Dev.to for active tracking queries, deduplicates mentions, and sends Slack webhook alerts.
+
+## Source registry (plug-and-play setup)
+- Source metadata and adapter wiring are centralized in [`/Users/deepmishra/vscode/signalze/worker/mention_worker/sources/registry.py`](/Users/deepmishra/vscode/signalze/worker/mention_worker/sources/registry.py).
+- To add a future source (for example Google, Brave, Product Hunt):
+  1. Add an adapter in `worker/mention_worker/sources/`.
+  2. Add one `SourceDefinition` entry with its builder in `registry.py`.
+  3. Set env flags (`SOURCE_<SLUG>_ENABLED`, poll interval, daily cap) and enable rows in `keyword_sources`.
 
 ## Why Python on Railway?
 Python is a good fit for this workload because polling, normalization, retries, and outbound webhook delivery are straightforward and reliable with small operational overhead.
@@ -9,6 +16,32 @@ Python is a good fit for this workload because polling, normalization, retries, 
 - Deploy this folder as a Railway service.
 - Run it as a **Cron job every 10-15 minutes**.
 - Command: `python main.py`
+
+## Free-tier-safe mode (recommended for MVP)
+Keep request volume conservative until you have paid customers.
+
+Suggested env values:
+- `FREE_TIER_MODE=true`
+- `SOURCE_HN_ENABLED=true`
+- `SOURCE_DEVTO_ENABLED=true`
+- `SOURCE_GITHUB_DISCUSSIONS_ENABLED=true`
+- `SOURCE_HN_POLL_INTERVAL_MINUTES=360` (6 hours)
+- `SOURCE_DEVTO_POLL_INTERVAL_MINUTES=720` (12 hours)
+- `SOURCE_GITHUB_DISCUSSIONS_POLL_INTERVAL_MINUTES=360` (6 hours)
+- `POLL_INTERVAL_MINUTES=15` (worker can still run often; source intervals gate calls)
+- `SOURCE_REDDIT_ENABLED=false`
+- `SOURCE_GOOGLE_ENABLED=false`
+- `SOURCE_BRAVE_ENABLED=false`
+- `SOURCE_PRODUCTHUNT_ENABLED=false`
+
+When `FREE_TIER_MODE=true`, the worker auto-applies conservative daily source request caps if you do not set explicit limits:
+- Hacker News: 2000/day
+- Dev.to: 1000/day
+- GitHub Discussions: 1000/day
+- Reddit: 500/day (unused in v1)
+- Google: 100/day (unused in v1)
+- Brave: 1000/day (unused in v1)
+- Product Hunt: 500/day (unused in v1)
 
 ## Required database schema
 Apply [`/Users/deepmishra/vscode/signalze/supabase/schema.sql`](/Users/deepmishra/vscode/signalze/supabase/schema.sql) first.
@@ -20,6 +53,7 @@ The schema includes:
 - Alert dedup (`alert_deliveries` unique by `(user_id, mention_id, keyword_id, channel)`)
 - Polling state (`keyword_source_state`)
 - Worker run logs (`worker_runs`)
+- Source enum values include `hackernews`, `devto`, `github_discussions`, plus disabled placeholders (`reddit`, `google`, `brave`, `producthunt`)
 
 ## Plan limits implemented
 - `starter_9`: max **1 active brand**, max **7 active user keywords**
@@ -32,8 +66,7 @@ Copy [`/Users/deepmishra/vscode/signalze/worker/.env.example`](/Users/deepmishra
 
 Minimum required:
 - `DATABASE_URL`
-- `REDDIT_CLIENT_ID`
-- `REDDIT_CLIENT_SECRET` (if Reddit source is enabled)
+- `GITHUB_TOKEN` (required when GitHub Discussions source is enabled)
 
 ## Local run
 ```bash

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from html import unescape
 import re
 
@@ -44,7 +44,7 @@ class HackerNewsSource:
             try:
                 published_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
             except Exception:
-                published_at = datetime.now(tz=UTC)
+                published_at = datetime.now(tz=timezone.utc)
 
             title = hit.get("title") or hit.get("story_title") or "Hacker News mention"
             excerpt = _strip_html(hit.get("comment_text") or hit.get("story_text") or "")

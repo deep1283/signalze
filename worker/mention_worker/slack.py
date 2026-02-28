@@ -1,28 +1,19 @@
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import timezone
 
 import httpx
 
 from mention_worker.models import PendingAlert
-
-
-def _platform_label(platform: str) -> str:
-    if platform == "hackernews":
-        return "Hacker News"
-    if platform == "reddit":
-        return "Reddit"
-    if platform == "devto":
-        return "Dev.to"
-    return platform
+from mention_worker.sources.registry import source_label
 
 
 def build_slack_payload(alert: PendingAlert) -> dict:
     mention = alert.mention
     brand = alert.brand_name or "your brand"
-    platform = _platform_label(mention.platform)
+    platform = source_label(mention.platform)
 
-    published = mention.published_at.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    published = mention.published_at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     summary = mention.body_excerpt.strip() or "No preview text available."
     summary = summary[:280]
 

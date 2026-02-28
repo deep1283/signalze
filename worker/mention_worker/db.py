@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from uuid import UUID
 
@@ -51,7 +51,7 @@ class Database:
         *,
         run_id: UUID,
         status: str,
-        stats: dict[str, int],
+        stats: dict[str, Any],
         error: str | None = None,
     ) -> None:
         with conn.cursor() as cur:
@@ -67,6 +67,42 @@ class Database:
                 (status, Jsonb(stats), error, run_id),
             )
         conn.commit()
+
+    @staticmethod
+    def fetch_today_source_requests(
+        conn: psycopg.Connection[Any],
+        *,
+        source_keys: tuple[str, ...],
+    ) -> dict[str, int]:
+        totals: dict[str, int] = {key: 0 for key in source_keys}
+        if not source_keys:
+            return totals
+
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                select
+                  stats->'source_requests' as source_requests
+                from public.worker_runs
+                where started_at >= (date_trunc('day', now() at time zone 'UTC') at time zone 'UTC')
+                """
+            )
+            rows = cur.fetchall() or []
+
+        for row in rows:
+            source_requests = row.get("source_requests")
+            if not isinstance(source_requests, dict):
+                continue
+            for key in source_keys:
+                raw_value = source_requests.get(key)
+                if raw_value is None:
+                    continue
+                try:
+                    totals[key] += int(raw_value)
+                except (TypeError, ValueError):
+                    continue
+
+        return totals
 
     @staticmethod
     def fetch_due_source_tasks(
@@ -155,7 +191,7 @@ class Database:
         error: str,
         backoff_minutes: int,
     ) -> None:
-        next_poll = datetime.now(tz=UTC) + timedelta(minutes=max(backoff_minutes, 1))
+        next_poll = datetime.now(tz=timezone.utc) + timedelta(minutes=max(backoff_minutes, 1))
         with conn.cursor() as cur:
             cur.execute(
                 """

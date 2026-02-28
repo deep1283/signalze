@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 
-@dataclass(slots=True)
+@dataclass
 class SourceTask:
     keyword_id: UUID
     user_id: UUID
@@ -16,7 +16,7 @@ class SourceTask:
     last_checked_at: datetime | None
 
 
-@dataclass(slots=True)
+@dataclass
 class MentionCandidate:
     platform: str
     external_id: str
@@ -29,7 +29,7 @@ class MentionCandidate:
     raw_payload: dict[str, Any]
 
 
-@dataclass(slots=True)
+@dataclass
 class PendingAlert:
     alert_id: int
     retry_count: int

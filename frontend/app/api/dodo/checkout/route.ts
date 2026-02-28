@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await requireAuth(request)
     const ip = getRequestIp(request)
-    const limit = takeRateLimit(`billing:checkout:${auth.userId}:${ip}`, 30, 60_000)
+    const limit = await takeRateLimit(`billing:checkout:${auth.userId}:${ip}`, 30, 60_000)
     if (!limit.allowed) {
       throw tooManyRequests("Too many checkout attempts. Please wait and try again.")
     }

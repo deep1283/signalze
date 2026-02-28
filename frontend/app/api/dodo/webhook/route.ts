@@ -1,13 +1,16 @@
-import { createHmac, timingSafeEqual } from "crypto"
+import { createHash, createHmac, timingSafeEqual } from "crypto"
 
 import { NextRequest, NextResponse } from "next/server"
 
-import { AppError, badRequest, toErrorResponse, unauthorized } from "@/lib/server/errors"
+import { AppError, badRequest, toErrorResponse, tooManyRequests, unauthorized } from "@/lib/server/errors"
+import { getRequestIp } from "@/lib/server/request"
+import { takeRateLimit } from "@/lib/server/rate-limit"
 import { parsePlanId } from "@/lib/server/validation"
 
 type Metadata = Record<string, unknown>
 
 type DodoEvent = {
+  id?: string
   type?: string
   event?: string
   metadata?: Metadata
@@ -33,6 +36,30 @@ type DodoEvent = {
     email?: string
   }
 }
+
+type ProfileSnapshot = {
+  id: string
+  email: string | null
+  plan_tier: "starter_9" | "growth_15"
+  billing_mode: "trial" | "paid" | null
+  plan_selected_at: string | null
+  trial_started_at: string | null
+  trial_ends_at: string | null
+}
+
+type TargetProfile = {
+  profile: ProfileSnapshot
+  filter: string
+}
+
+const MAX_WEBHOOK_CLOCK_SKEW_MS = 10 * 60_000
+const WEBHOOK_RATE_LIMIT_PER_MINUTE = 180
+const WEBHOOK_PREAUTH_RATE_LIMIT_PER_MINUTE = 1200
+const FALLBACK_EVENT_MEMORY_LIMIT = 20_000
+const FALLBACK_EVENT_TTL_MS = 24 * 60 * 60 * 1000
+const FALLBACK_PRUNE_EVERY_CALLS = 100
+const fallbackSeenEvents = new Map<string, number>()
+let fallbackReserveCalls = 0
 
 function getServiceEnv() {
   const supabaseUrl = process.env.SUPABASE_URL
@@ -79,6 +106,34 @@ function parseSignatureCandidates(signatureHeader: string | null): string[] {
   }
 
   return values
+}
+
+function parseWebhookTimestampMs(raw: string | null): number | null {
+  if (!raw) {
+    return null
+  }
+
+  const numeric = Number(raw)
+  if (!Number.isFinite(numeric)) {
+    return null
+  }
+
+  const asMs = numeric > 1_000_000_000_000 ? numeric : numeric * 1000
+  if (!Number.isFinite(asMs) || asMs <= 0) {
+    return null
+  }
+  return Math.floor(asMs)
+}
+
+function ensureRecentTimestamp(request: NextRequest) {
+  const parsed = parseWebhookTimestampMs(request.headers.get("webhook-timestamp"))
+  if (parsed === null) {
+    return
+  }
+
+  if (Math.abs(Date.now() - parsed) > MAX_WEBHOOK_CLOCK_SKEW_MS) {
+    throw unauthorized("Webhook timestamp is outside the allowed window.")
+  }
 }
 
 function verifyWebhookSignature(request: NextRequest, rawBody: string, secret: string): boolean {
@@ -186,6 +241,133 @@ function inferTrialDays(payload: DodoEvent): number {
   return Math.min(Math.floor(parsed), 30)
 }
 
+function getEventId(request: NextRequest, payload: DodoEvent, rawBody: string): string {
+  const fromHeader = request.headers.get("webhook-id")
+  if (fromHeader?.trim()) {
+    return fromHeader.trim()
+  }
+
+  if (typeof payload.id === "string" && payload.id.trim()) {
+    return payload.id.trim()
+  }
+
+  return createHash("sha256").update(rawBody, "utf8").digest("hex")
+}
+
+function headersForServiceRole(key: string): Record<string, string> {
+  return {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    "Content-Type": "application/json",
+  }
+}
+
+async function getProfileByFilter(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  filter: string,
+): Promise<ProfileSnapshot | null> {
+  const response = await fetch(
+    `${supabaseUrl}/rest/v1/profiles?${filter}&select=id,email,plan_tier,billing_mode,plan_selected_at,trial_started_at,trial_ends_at&limit=1`,
+    {
+      method: "GET",
+      headers: headersForServiceRole(serviceRoleKey),
+      cache: "no-store",
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Supabase profile fetch failed (${response.status})`)
+  }
+
+  const rows = (await response.json().catch(() => [])) as ProfileSnapshot[]
+  return rows[0] ?? null
+}
+
+async function resolveTargetProfile(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  payload: DodoEvent,
+): Promise<TargetProfile> {
+  const userId = getUserId(payload)
+  if (userId) {
+    const filter = `id=eq.${encodeURIComponent(userId)}`
+    const profile = await getProfileByFilter(supabaseUrl, serviceRoleKey, filter)
+    if (profile) {
+      return { profile, filter }
+    }
+  }
+
+  const email = getEmail(payload)
+  if (!email) {
+    throw badRequest("Webhook payload missing user identifier.")
+  }
+
+  const filter = `email=eq.${encodeURIComponent(email)}`
+  const profile = await getProfileByFilter(supabaseUrl, serviceRoleKey, filter)
+  if (!profile) {
+    throw badRequest("No profile found for webhook customer.")
+  }
+
+  return { profile, filter }
+}
+
+function buildProfilePatch(existing: ProfileSnapshot, payload: DodoEvent, eventType: string, nowIso: string): Record<string, unknown> {
+  const planId = inferPlanId(payload)
+  const checkoutBillingMode = inferBillingMode(payload)
+  const checkoutTrialDays = inferTrialDays(payload)
+  const isPaidEvent =
+    eventType.includes("payment.succeeded") || eventType.includes("subscription.renewed") || eventType.includes("invoice.paid")
+
+  if (existing.billing_mode === "paid" && !isPaidEvent) {
+    return {
+      plan_tier: planId,
+      plan_selected_at: existing.plan_selected_at ?? nowIso,
+      billing_mode: "paid",
+      trial_started_at: null,
+      trial_ends_at: null,
+    }
+  }
+
+  if (isPaidEvent) {
+    return {
+      plan_tier: planId,
+      plan_selected_at: existing.plan_selected_at ?? nowIso,
+      billing_mode: "paid",
+      trial_started_at: null,
+      trial_ends_at: null,
+    }
+  }
+
+  if (checkoutBillingMode === "trial" && checkoutTrialDays > 0) {
+    if (existing.trial_started_at && existing.trial_ends_at) {
+      return {
+        plan_tier: planId,
+        plan_selected_at: existing.plan_selected_at ?? nowIso,
+        billing_mode: "trial",
+        trial_started_at: existing.trial_started_at,
+        trial_ends_at: existing.trial_ends_at,
+      }
+    }
+
+    return {
+      plan_tier: planId,
+      plan_selected_at: existing.plan_selected_at ?? nowIso,
+      billing_mode: "trial",
+      trial_started_at: nowIso,
+      trial_ends_at: new Date(Date.now() + checkoutTrialDays * 24 * 60 * 60 * 1000).toISOString(),
+    }
+  }
+
+  return {
+    plan_tier: planId,
+    plan_selected_at: existing.plan_selected_at ?? nowIso,
+    billing_mode: "paid",
+    trial_started_at: null,
+    trial_ends_at: null,
+  }
+}
+
 async function patchProfileByFilter(
   supabaseUrl: string,
   serviceRoleKey: string,
@@ -195,9 +377,7 @@ async function patchProfileByFilter(
   const response = await fetch(`${supabaseUrl}/rest/v1/profiles?${filter}`, {
     method: "PATCH",
     headers: {
-      apikey: serviceRoleKey,
-      Authorization: `Bearer ${serviceRoleKey}`,
-      "Content-Type": "application/json",
+      ...headersForServiceRole(serviceRoleKey),
       Prefer: "return=representation",
     },
     body: JSON.stringify(patch),
@@ -211,13 +391,94 @@ async function patchProfileByFilter(
   return (await response.json().catch(() => [])) as Array<Record<string, unknown>>
 }
 
+function pruneFallbackEventMemory(now: number) {
+  // Always evict expired entries first.
+  for (const [key, seenAt] of fallbackSeenEvents.entries()) {
+    if (now - seenAt > FALLBACK_EVENT_TTL_MS) {
+      fallbackSeenEvents.delete(key)
+    }
+  }
+
+  // Enforce hard cap if needed (Map preserves insertion order).
+  if (fallbackSeenEvents.size <= FALLBACK_EVENT_MEMORY_LIMIT) {
+    return
+  }
+
+  for (const key of fallbackSeenEvents.keys()) {
+    fallbackSeenEvents.delete(key)
+    if (fallbackSeenEvents.size <= FALLBACK_EVENT_MEMORY_LIMIT) {
+      break
+    }
+  }
+}
+
+function reserveFallbackEvent(provider: string, eventId: string): boolean {
+  const now = Date.now()
+  fallbackReserveCalls += 1
+  if (
+    fallbackSeenEvents.size >= FALLBACK_EVENT_MEMORY_LIMIT ||
+    fallbackReserveCalls % FALLBACK_PRUNE_EVERY_CALLS === 0
+  ) {
+    pruneFallbackEventMemory(now)
+  }
+
+  const key = `${provider}:${eventId}`
+  if (fallbackSeenEvents.has(key)) {
+    return false
+  }
+
+  fallbackSeenEvents.set(key, now)
+  return true
+}
+
+async function reserveWebhookEvent(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  provider: string,
+  eventId: string,
+): Promise<boolean> {
+  const response = await fetch(`${supabaseUrl}/rest/v1/webhook_events?on_conflict=provider,event_id`, {
+    method: "POST",
+    headers: {
+      ...headersForServiceRole(serviceRoleKey),
+      Prefer: "resolution=ignore-duplicates,return=representation",
+    },
+    body: JSON.stringify([{ provider, event_id: eventId }]),
+    cache: "no-store",
+  })
+
+  if (response.status === 404) {
+    return reserveFallbackEvent(provider, eventId)
+  }
+
+  if (!response.ok) {
+    throw new Error(`Webhook idempotency insert failed (${response.status})`)
+  }
+
+  const rows = (await response.json().catch(() => [])) as Array<Record<string, unknown>>
+  return rows.length > 0
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { supabaseUrl, serviceRoleKey, webhookSecret } = getServiceEnv()
+
+    const ip = getRequestIp(request)
+    const preauthLimit = await takeRateLimit(`dodo:webhook:preauth:${ip}`, WEBHOOK_PREAUTH_RATE_LIMIT_PER_MINUTE, 60_000)
+    if (!preauthLimit.allowed) {
+      throw tooManyRequests("Webhook rate limit exceeded.")
+    }
+
     const rawBody = await request.text()
+    ensureRecentTimestamp(request)
 
     if (!verifyWebhookSignature(request, rawBody, webhookSecret)) {
       throw unauthorized("Invalid webhook signature.")
+    }
+
+    const limit = await takeRateLimit(`dodo:webhook:${ip}`, WEBHOOK_RATE_LIMIT_PER_MINUTE, 60_000)
+    if (!limit.allowed) {
+      throw tooManyRequests("Webhook rate limit exceeded.")
     }
 
     const payload = JSON.parse(rawBody) as DodoEvent
@@ -230,38 +491,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, ignored: true })
     }
 
-    const now = new Date().toISOString()
-    const checkoutBillingMode = inferBillingMode(payload)
-    const checkoutTrialDays = inferTrialDays(payload)
-    const isPaidEvent =
-      eventType.includes("payment.succeeded") || eventType.includes("subscription.renewed") || eventType.includes("invoice.paid")
-
-    const patch: Record<string, unknown> = {
-      plan_tier: inferPlanId(payload),
-      plan_selected_at: now,
-      billing_mode: "paid",
-      trial_started_at: null,
-      trial_ends_at: null,
+    const eventId = getEventId(request, payload, rawBody)
+    const firstSeen = await reserveWebhookEvent(supabaseUrl, serviceRoleKey, "dodo", eventId)
+    if (!firstSeen) {
+      return NextResponse.json({ ok: true, duplicate: true })
     }
 
-    if (!isPaidEvent && checkoutBillingMode === "trial" && checkoutTrialDays > 0) {
-      patch.billing_mode = "trial"
-      patch.trial_started_at = now
-      patch.trial_ends_at = new Date(Date.now() + checkoutTrialDays * 24 * 60 * 60 * 1000).toISOString()
-    }
+    const target = await resolveTargetProfile(supabaseUrl, serviceRoleKey, payload)
+    const nowIso = new Date().toISOString()
+    const patch = buildProfilePatch(target.profile, payload, eventType, nowIso)
+    await patchProfileByFilter(supabaseUrl, serviceRoleKey, target.filter, patch)
 
-    const userId = getUserId(payload)
-    if (userId) {
-      await patchProfileByFilter(supabaseUrl, serviceRoleKey, `id=eq.${encodeURIComponent(userId)}`, patch)
-      return NextResponse.json({ ok: true })
-    }
-
-    const email = getEmail(payload)
-    if (!email) {
-      throw badRequest("Webhook payload missing user identifier.")
-    }
-
-    await patchProfileByFilter(supabaseUrl, serviceRoleKey, `email=eq.${encodeURIComponent(email)}`, patch)
     return NextResponse.json({ ok: true })
   } catch (error) {
     return toErrorResponse("api/dodo/webhook", error, "Webhook processing failed.")

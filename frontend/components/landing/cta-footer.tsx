@@ -14,7 +14,7 @@ export function CTAFooter() {
               Join teams using Mention to stay on top of every Hacker News, Dev.to, and GitHub Discussions conversation about their brand.
             </p>
             <Link
-              href="/login"
+              href="/pricing"
               className="mt-8 inline-flex items-center gap-2 rounded-full bg-accent px-8 py-3.5 text-sm font-semibold text-accent-foreground transition-all hover:brightness-95"
             >
               Start 2-day trial <ArrowRight className="h-4 w-4" />
@@ -32,7 +32,7 @@ export function CTAFooter() {
             <Link href="#" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
               Features
             </Link>
-            <Link href="#" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
+            <Link href="/pricing" className="text-sm text-muted-foreground transition-colors hover:text-foreground">
               Pricing
             </Link>
             <Link href="#" className="text-sm text-muted-foreground transition-colors hover:text-foreground">

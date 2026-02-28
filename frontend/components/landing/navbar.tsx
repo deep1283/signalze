@@ -40,7 +40,7 @@ export function Navbar() {
             Log in
           </Link>
           <Link
-            href="/login"
+            href="/pricing"
             className="rounded-full bg-primary px-5 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
           >
             Start now
@@ -82,7 +82,7 @@ export function Navbar() {
               Log in
             </Link>
             <Link
-              href="/login"
+              href="/pricing"
               className="inline-block rounded-full bg-primary px-5 py-2 text-center text-sm font-medium text-primary-foreground"
             >
               Start now

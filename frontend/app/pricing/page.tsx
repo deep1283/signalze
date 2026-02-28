@@ -9,11 +9,15 @@ import { ensureProfile, getValidSession, type SessionData } from "@/lib/supabase
 
 const PLAN_ORDER: PlanId[] = ["starter_9", "growth_15"]
 
+const SOURCES = ["Hacker News", "Dev.to", "GitHub Discussions"]
+
+type PageState = "loading" | "public" | "choose_plan"
+
 export default function PricingPage() {
   const router = useRouter()
 
+  const [pageState, setPageState] = useState<PageState>("loading")
   const [session, setSession] = useState<SessionData | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
   const [isChoosing, setIsChoosing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -21,25 +25,30 @@ export default function PricingPage() {
     async function bootstrap() {
       try {
         const validSession = await getValidSession()
+
         if (!validSession) {
-          router.replace("/login")
+          setPageState("public")
           return
         }
 
         setSession(validSession)
         const profile = await ensureProfile(validSession)
-        if (profile?.plan_selected_at && !profile.onboarding_completed) {
-          router.replace("/onboarding")
+
+        // Already has a plan selected — send to the right place
+        if (profile?.plan_selected_at) {
+          if (!profile.onboarding_completed) {
+            router.replace("/onboarding")
+          } else {
+            router.replace("/dashboard")
+          }
           return
         }
-        if (profile?.plan_selected_at && profile.onboarding_completed) {
-          router.replace("/dashboard")
-          return
-        }
-      } catch (bootstrapError) {
-        setError(bootstrapError instanceof Error ? bootstrapError.message : "Failed to load pricing")
-      } finally {
-        setIsLoading(false)
+
+        // Logged in, no plan yet — show the plan chooser
+        setPageState("choose_plan")
+      } catch {
+        // On any error fall back to public view
+        setPageState("public")
       }
     }
 
@@ -56,26 +65,94 @@ export default function PricingPage() {
     setIsChoosing(true)
 
     try {
-      if (mode === "paid") {
-        window.location.href = `/api/dodo/checkout?plan=${planId}&billing=paid`
-      } else {
-        window.location.href = `/api/dodo/checkout?plan=${planId}&billing=trial`
-      }
+      window.location.href = `/api/dodo/checkout?plan=${planId}&billing=${mode}`
     } catch (chooseError) {
       setError(chooseError instanceof Error ? chooseError.message : "Failed to select plan")
-    } finally {
       setIsChoosing(false)
     }
   }
 
-  if (isLoading) {
+  if (pageState === "loading") {
     return (
       <main className="min-h-screen bg-background px-4 py-8 sm:px-6 md:py-12">
-        <div className="mx-auto w-full max-w-3xl rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading pricing...</div>
+        <div className="mx-auto w-full max-w-3xl rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground">
+          Loading...
+        </div>
       </main>
     )
   }
 
+  // ─── Public view (not logged in) ───────────────────────────────────────────
+  if (pageState === "public") {
+    return (
+      <main className="min-h-screen bg-background px-4 py-16 sm:px-6 md:py-24">
+        <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-10">
+          <div className="text-center">
+            <h1 className="font-serif text-4xl text-foreground sm:text-5xl">Simple, honest pricing</h1>
+            <p className="mt-4 max-w-xl text-base text-muted-foreground">
+              Track mentions of your brand across Hacker News, Dev.to, and GitHub Discussions.
+              Start with a free trial — no credit card required.
+            </p>
+          </div>
+
+          <div className="grid w-full gap-4 sm:grid-cols-2 max-w-3xl">
+            {PLAN_ORDER.map((planId) => {
+              const plan = PLAN_CONFIG[planId]
+              const isPopular = planId === "growth_15"
+              return (
+                <article
+                  key={plan.id}
+                  className={`relative rounded-2xl border bg-card p-6 sm:p-8 flex flex-col gap-6 ${isPopular ? "border-primary" : "border-border"}`}
+                >
+                  {isPopular && (
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-primary px-3 py-0.5 text-xs font-semibold text-primary-foreground">
+                      Most popular
+                    </span>
+                  )}
+
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{plan.name}</p>
+                    <p className="mt-2 text-4xl font-semibold text-foreground">{plan.price}</p>
+                    <p className="mt-2 text-sm text-muted-foreground">{plan.description}</p>
+                  </div>
+
+                  <ul className="flex flex-col gap-2 text-sm text-foreground">
+                    <li>✓ {plan.maxBrands === null ? "Multiple brands" : `${plan.maxBrands} brand`}</li>
+                    <li>✓ {plan.maxKeywords} keywords</li>
+                    <li>✓ {plan.trialDays}-day free trial</li>
+                    {SOURCES.map((s) => (
+                      <li key={s}>✓ {s}</li>
+                    ))}
+                    <li>✓ Slack notifications</li>
+                  </ul>
+
+                  <Link
+                    href="/login"
+                    className={`inline-flex h-11 items-center justify-center rounded-lg px-6 text-sm font-medium transition-colors ${
+                      isPopular
+                        ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                        : "border border-border text-foreground hover:bg-secondary"
+                    }`}
+                  >
+                    Start {plan.trialDays}-day free trial
+                  </Link>
+                </article>
+              )
+            })}
+          </div>
+
+          <p className="text-center text-sm text-muted-foreground">
+            Already have an account?{" "}
+            <Link href="/login" className="font-medium text-foreground hover:underline">
+              Log in
+            </Link>
+          </p>
+        </div>
+      </main>
+    )
+  }
+
+  // ─── Authed view — plan chooser (step 2 of onboarding) ────────────────────
   return (
     <main className="min-h-screen bg-background px-4 py-8 sm:px-6 md:py-12">
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">

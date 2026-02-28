@@ -15,7 +15,7 @@ export function Hero() {
           </p>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
             <Link
-              href="/login"
+              href="/pricing"
               className="inline-flex items-center gap-2 rounded-full bg-accent px-6 py-3 text-sm font-semibold text-accent-foreground transition-all hover:brightness-95"
             >
               Start tracking for free <ArrowRight className="h-4 w-4" />

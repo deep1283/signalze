@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 
-import { isPlanId, PLAN_CONFIG, type PlanId } from "@/lib/plans"
+import { isPlanId, type PlanId } from "@/lib/plans"
 import { requireAuth } from "@/lib/server/authz"
-import { AppError, toErrorResponse, tooManyRequests } from "@/lib/server/errors"
+import { AppError, badRequest, toErrorResponse, tooManyRequests } from "@/lib/server/errors"
 import { getRequestIp } from "@/lib/server/request"
 import { takeRateLimit } from "@/lib/server/rate-limit"
 import { withSessionCookie } from "@/lib/server/session"
@@ -10,8 +10,6 @@ import { withSessionCookie } from "@/lib/server/session"
 type CheckoutResponse = {
   checkout_url?: string | null
 }
-
-type BillingChoice = "trial" | "paid"
 
 const PRODUCT_IDS: Record<PlanId, string | undefined> = {
   starter_9: process.env.DODO_PLUS_PRODUCT_ID ?? process.env.DODO_PRODUCT_ID_PLUS,
@@ -49,13 +47,16 @@ export async function GET(request: NextRequest) {
     const planParam = request.nextUrl.searchParams.get("plan")
     const plan: PlanId = isPlanId(planParam) ? planParam : "starter_9"
     const billingParam = request.nextUrl.searchParams.get("billing")
-    const billing: BillingChoice = billingParam === "paid" ? "paid" : "trial"
+    if (billingParam && billingParam !== "paid") {
+      throw badRequest("Trial checkout is not supported. Start your free trial from pricing.")
+    }
+    const billing = "paid"
     const productId = PRODUCT_IDS[plan]
     if (!productId) {
       throw new AppError(500, "Plan checkout is not configured.", `Missing product ID for ${plan}.`)
     }
 
-    const trialDays = billing === "paid" ? 0 : PLAN_CONFIG[plan].trialDays
+    const trialDays = 0
 
     const response = await fetch(`${baseUrl}/checkouts`, {
       method: "POST",
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest) {
         subscription_data: {
           trial_period_days: trialDays,
         },
-        return_url: `${appUrl}/login?checkout=return&plan=${plan}`,
+        return_url: `${appUrl}/login?checkout=return`,
       }),
       cache: "no-store",
     })

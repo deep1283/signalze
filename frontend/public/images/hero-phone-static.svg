@@ -1,0 +1,81 @@
+<svg width="1200" height="1000" viewBox="0 0 1200 1000" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow-soft" x="0" y="0" width="1200" height="1000" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="28" stdDeviation="24" flood-color="#1F2314" flood-opacity="0.18" />
+    </filter>
+    <filter id="shadow-chip" x="-20%" y="-60%" width="160%" height="220%" filterUnits="objectBoundingBox" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#1E1E1E" flood-opacity="0.2" />
+    </filter>
+    <linearGradient id="ring-grad" x1="270" y1="640" x2="920" y2="640" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F1F1EC" />
+      <stop offset="1" stop-color="#DCDDD5" />
+    </linearGradient>
+    <linearGradient id="phone-frame" x1="410" y1="180" x2="630" y2="750" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#242424" />
+      <stop offset="1" stop-color="#55575A" />
+    </linearGradient>
+    <linearGradient id="screen-grad" x1="430" y1="220" x2="596" y2="720" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" />
+      <stop offset="1" stop-color="#F3F3F6" />
+    </linearGradient>
+    <linearGradient id="cta-grad" x1="445" y1="630" x2="595" y2="630" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B5CF6" />
+      <stop offset="1" stop-color="#6D28D9" />
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="1000" fill="#F5F5F2" />
+
+  <g filter="url(#shadow-soft)">
+    <ellipse cx="605" cy="705" rx="335" ry="96" fill="url(#ring-grad)" />
+    <ellipse cx="605" cy="705" rx="210" ry="60" fill="#FFFFFF" />
+  </g>
+
+  <g transform="rotate(12 525 465)" filter="url(#shadow-soft)">
+    <rect x="392" y="168" width="260" height="600" rx="42" fill="url(#phone-frame)" />
+    <rect x="410" y="188" width="224" height="560" rx="32" fill="url(#screen-grad)" />
+    <rect x="488" y="197" width="70" height="18" rx="9" fill="#18181B" />
+  </g>
+
+  <g transform="rotate(12 525 465)">
+    <circle cx="520" cy="253" r="21" fill="#F1EAFF" />
+    <circle cx="520" cy="253" r="11" fill="#7C3AED" />
+    <text x="550" y="249" font-size="15" font-family="Inter, Arial, sans-serif" font-weight="700" fill="#292A2F">PulseVents</text>
+    <text x="550" y="270" font-size="10" font-family="Inter, Arial, sans-serif" fill="#7A7D88">Realtime tracking</text>
+
+    <rect x="442" y="306" width="160" height="10" rx="5" fill="#E3E5EA" />
+    <rect x="442" y="325" width="120" height="8" rx="4" fill="#ECEEF3" />
+
+    <circle cx="450" cy="370" r="9" fill="#DBEAFE" />
+    <rect x="466" y="364" width="125" height="8" rx="4" fill="#DDE1EA" />
+    <rect x="466" y="378" width="88" height="7" rx="3.5" fill="#ECEEF3" />
+
+    <circle cx="450" cy="420" r="9" fill="#E9D5FF" />
+    <rect x="466" y="414" width="138" height="8" rx="4" fill="#DDE1EA" />
+    <rect x="466" y="428" width="96" height="7" rx="3.5" fill="#ECEEF3" />
+
+    <circle cx="450" cy="470" r="9" fill="#DCFCE7" />
+    <rect x="466" y="464" width="132" height="8" rx="4" fill="#DDE1EA" />
+    <rect x="466" y="478" width="104" height="7" rx="3.5" fill="#ECEEF3" />
+
+    <rect x="442" y="612" width="160" height="28" rx="14" fill="url(#cta-grad)" />
+    <text x="490" y="630" font-size="10" font-family="Inter, Arial, sans-serif" font-weight="700" fill="#FFFFFF">TRACK NOW</text>
+  </g>
+
+  <g filter="url(#shadow-chip)">
+    <rect x="805" y="345" width="170" height="54" rx="27" fill="#FFFFFF" />
+    <text x="853" y="378" font-size="18" font-family="Inter, Arial, sans-serif" font-weight="600" fill="#6E727D">GDPR compliant</text>
+  </g>
+  <g filter="url(#shadow-chip)">
+    <rect x="772" y="520" width="160" height="52" rx="26" fill="#FFFFFF" />
+    <text x="823" y="552" font-size="17" font-family="Inter, Arial, sans-serif" font-weight="600" fill="#6E727D">Content rules</text>
+  </g>
+  <g filter="url(#shadow-chip)">
+    <rect x="155" y="620" width="146" height="50" rx="25" fill="#FFFFFF" />
+    <text x="199" y="651" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="600" fill="#6E727D">Quick setup</text>
+  </g>
+  <g filter="url(#shadow-chip)">
+    <rect x="575" y="760" width="130" height="50" rx="25" fill="#FFFFFF" />
+    <text x="610" y="791" font-size="16" font-family="Inter, Arial, sans-serif" font-weight="600" fill="#6E727D">AI codes</text>
+  </g>
+</svg>

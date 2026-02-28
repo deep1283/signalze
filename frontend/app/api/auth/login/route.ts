@@ -5,7 +5,7 @@ import { tooManyRequests, toErrorResponse } from "@/lib/server/errors"
 import { createSessionResponse } from "@/lib/server/session"
 import { getRequestIp, parseJsonBody } from "@/lib/server/request"
 import { takeRateLimit } from "@/lib/server/rate-limit"
-import { validateEmail, validatePassword } from "@/lib/server/validation"
+import { isTrialExpired, validateEmail, validatePassword } from "@/lib/server/validation"
 
 type AuthMode = "signin" | "signup"
 
@@ -31,7 +31,13 @@ export async function POST(request: NextRequest) {
     const session = mode === "signup" ? await signUpWithPassword(email, password) : await signInWithPassword(email, password)
     const profile = await ensureProfile(session.accessToken, session.user.id, session.user.email)
 
-    const nextRoute = !profile.plan_selected_at ? "/pricing" : !profile.onboarding_completed ? "/onboarding" : "/dashboard"
+    const nextRoute = !profile.plan_selected_at
+      ? "/pricing"
+      : isTrialExpired(profile)
+        ? "/upgrade"
+        : !profile.onboarding_completed
+          ? "/onboarding"
+          : "/dashboard"
 
     return createSessionResponse(
       {

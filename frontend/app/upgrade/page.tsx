@@ -6,39 +6,41 @@ import { useEffect, useState } from "react"
 
 import { isTrialExpired } from "@/lib/client/billing"
 import { PLAN_CONFIG, type PlanId } from "@/lib/plans"
-import { ensureProfile, getValidSession } from "@/lib/supabase-lite"
+import { ensureProfile, getValidSession, type SessionData } from "@/lib/supabase-lite"
 
 const PLAN_ORDER: PlanId[] = ["starter_9", "growth_15"]
 const SOURCES = ["Hacker News", "Dev.to", "GitHub Discussions"]
 
-export default function PricingPage() {
+export default function UpgradePage() {
   const router = useRouter()
   const [ready, setReady] = useState(false)
+  const [session, setSession] = useState<SessionData | null>(null)
 
   useEffect(() => {
     async function bootstrap() {
       try {
         const validSession = await getValidSession()
         if (!validSession) {
-          setReady(true)
+          router.replace("/login")
           return
         }
 
+        setSession(validSession)
         const profile = await ensureProfile(validSession)
 
         if (!profile.plan_selected_at) {
-          setReady(true)
+          router.replace("/pricing")
           return
         }
 
-        if (isTrialExpired(profile.billing_mode, profile.trial_ends_at)) {
-          router.replace("/upgrade")
+        if (!isTrialExpired(profile.billing_mode, profile.trial_ends_at)) {
+          router.replace(profile.onboarding_completed ? "/dashboard" : "/onboarding")
           return
         }
 
-        router.replace(profile.onboarding_completed ? "/dashboard" : "/onboarding")
-      } catch {
         setReady(true)
+      } catch {
+        router.replace("/login")
       }
     }
     void bootstrap()
@@ -58,9 +60,9 @@ export default function PricingPage() {
     <main className="min-h-screen bg-background px-4 py-16 sm:px-6 md:py-24">
       <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-10">
         <div className="text-center">
-          <h1 className="font-serif text-4xl text-foreground sm:text-5xl">Simple, honest pricing</h1>
+          <h1 className="font-serif text-4xl text-foreground sm:text-5xl">Your trial has ended</h1>
           <p className="mt-4 max-w-xl text-base text-muted-foreground">
-            Track mentions of your brand across Hacker News, Dev.to, and GitHub Discussions. Start with a 2-day free trial.
+            Upgrade now to continue tracking mentions and receiving Slack alerts.
           </p>
         </div>
 
@@ -68,6 +70,8 @@ export default function PricingPage() {
           {PLAN_ORDER.map((planId) => {
             const plan = PLAN_CONFIG[planId]
             const isPopular = planId === "growth_15"
+            const ctaHref = session ? `/api/dodo/checkout?plan=${plan.id}&billing=paid` : "/login"
+
             return (
               <article
                 key={plan.id}
@@ -90,7 +94,6 @@ export default function PricingPage() {
                 <ul className="flex flex-col gap-2 text-sm text-foreground">
                   <li>✓ {plan.maxBrands === null ? "Multiple brands" : `${plan.maxBrands} brand`}</li>
                   <li>✓ {plan.maxKeywords} keywords</li>
-                  <li>✓ 2-day free trial</li>
                   {SOURCES.map((s) => (
                     <li key={s}>✓ {s}</li>
                   ))}
@@ -98,24 +101,17 @@ export default function PricingPage() {
                 </ul>
 
                 <Link
-                  href={`/login?plan=${plan.id}`}
+                  href={ctaHref}
                   className={`inline-flex h-11 items-center justify-center rounded-lg px-6 text-sm font-medium transition-colors ${
                     isPopular ? "bg-primary text-primary-foreground hover:bg-primary/90" : "border border-border text-foreground hover:bg-secondary"
                   }`}
                 >
-                  Start 2-day free trial
+                  Upgrade now
                 </Link>
               </article>
             )
           })}
         </div>
-
-        <p className="text-center text-sm text-muted-foreground">
-          Already have an account?{" "}
-          <Link href="/login" className="font-medium text-foreground hover:underline">
-            Log in
-          </Link>
-        </p>
       </div>
     </main>
   )

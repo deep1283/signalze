@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
 
+import { isTrialExpired } from "@/lib/client/billing"
 import { PLAN_CONFIG, type PlanId } from "@/lib/plans"
 import {
   ensureProfile,
@@ -52,6 +53,11 @@ export default function OnboardingPage() {
           return
         }
 
+        if (isTrialExpired(profile.billing_mode, profile.trial_ends_at)) {
+          router.replace("/upgrade")
+          return
+        }
+
         setPlanId(profile.plan_tier)
         setBilling(profile.billing_mode ?? "trial")
 
@@ -64,7 +70,12 @@ export default function OnboardingPage() {
           return
         }
       } catch (bootstrapError) {
-        setError(bootstrapError instanceof Error ? bootstrapError.message : "Failed to load onboarding")
+        const message = bootstrapError instanceof Error ? bootstrapError.message : "Failed to load onboarding"
+        if (message.toLowerCase().includes("trial has ended")) {
+          router.replace("/upgrade")
+          return
+        }
+        setError(message)
       } finally {
         setIsLoading(false)
       }

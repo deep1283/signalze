@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 
 const SESSION_COOKIE = "signalze_session"
-const PROTECTED_PATHS = ["/dashboard", "/onboarding", "/pricing"]
+const PROTECTED_PATHS = ["/dashboard", "/onboarding", "/upgrade"]
 
 function isProtected(pathname: string): boolean {
   return PROTECTED_PATHS.some((base) => pathname === base || pathname.startsWith(`${base}/`))
@@ -26,5 +26,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/onboarding/:path*", "/pricing/:path*"],
+  matcher: ["/dashboard/:path*", "/onboarding/:path*", "/upgrade/:path*"],
 }

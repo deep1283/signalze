@@ -53,16 +53,22 @@ export function assertPlanCounts(planId: PlanId, brands: string[], keywords: str
   }
 }
 
+export function isTrialExpired(profile: Pick<ProfileRow, "billing_mode" | "trial_ends_at">): boolean {
+  if (profile.billing_mode !== "trial" || !profile.trial_ends_at) {
+    return false
+  }
+
+  const expiresAt = new Date(profile.trial_ends_at).getTime()
+  return !Number.isNaN(expiresAt) && expiresAt <= Date.now()
+}
+
 export function ensureActiveEntitlement(profile: ProfileRow) {
   if (!profile.plan_selected_at) {
     throw badRequest("Select a plan to continue.")
   }
 
-  if (profile.billing_mode === "trial" && profile.trial_ends_at) {
-    const expiresAt = new Date(profile.trial_ends_at).getTime()
-    if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) {
-      throw paymentRequired()
-    }
+  if (isTrialExpired(profile)) {
+    throw paymentRequired()
   }
 }
 
@@ -87,4 +93,3 @@ export function validatePassword(rawPassword: unknown): string {
   }
   return rawPassword
 }
-

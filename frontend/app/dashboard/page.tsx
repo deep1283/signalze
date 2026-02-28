@@ -3,6 +3,7 @@
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 
+import { isTrialExpired } from "@/lib/client/billing"
 import {
   ACTIVE_PLATFORMS,
   PLATFORM_FILTERS,
@@ -103,6 +104,11 @@ export default function DashboardPage() {
           return
         }
 
+        if (isTrialExpired(profile.billing_mode, profile.trial_ends_at)) {
+          window.location.replace("/upgrade")
+          return
+        }
+
         if (!profile.onboarding_completed) {
           window.location.replace("/onboarding")
           return
@@ -116,7 +122,12 @@ export default function DashboardPage() {
         setBrandRows(brands)
         setKeywordRows(keywords)
       } catch (bootstrapError) {
-        setError(bootstrapError instanceof Error ? bootstrapError.message : "Failed to load dashboard")
+        const message = bootstrapError instanceof Error ? bootstrapError.message : "Failed to load dashboard"
+        if (message.toLowerCase().includes("trial has ended")) {
+          window.location.replace("/upgrade")
+          return
+        }
+        setError(message)
       } finally {
         setIsLoading(false)
       }

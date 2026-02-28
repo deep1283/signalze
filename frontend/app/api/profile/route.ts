@@ -15,7 +15,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const auth = await requireAuth(request)
     const ip = getRequestIp(request)
-    const rate = takeRateLimit(`profile:patch:${auth.userId}:${ip}`, 30, 60_000)
+    const rate = await takeRateLimit(`profile:patch:${auth.userId}:${ip}`, 30, 60_000)
     if (!rate.allowed) {
       throw tooManyRequests()
     }
@@ -38,4 +38,3 @@ export async function PATCH(request: NextRequest) {
     return toErrorResponse("api/profile:patch", error, "Unable to update profile.")
   }
 }
-

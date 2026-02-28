@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await requireEntitledAuth(request)
     const ip = getRequestIp(request)
-    const rate = takeRateLimit(`onboarding:setup:${auth.userId}:${ip}`, 20, 60_000)
+    const rate = await takeRateLimit(`onboarding:setup:${auth.userId}:${ip}`, 20, 60_000)
     if (!rate.allowed) {
       throw tooManyRequests()
     }

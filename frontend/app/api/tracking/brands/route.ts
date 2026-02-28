@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await requireEntitledAuth(request)
     const ip = getRequestIp(request)
-    const rate = takeRateLimit(`tracking:brands:create:${auth.userId}:${ip}`, 30, 60_000)
+    const rate = await takeRateLimit(`tracking:brands:create:${auth.userId}:${ip}`, 30, 60_000)
     if (!rate.allowed) {
       throw tooManyRequests()
     }
@@ -74,7 +74,7 @@ export async function PATCH(request: NextRequest) {
   try {
     const auth = await requireEntitledAuth(request)
     const ip = getRequestIp(request)
-    const rate = takeRateLimit(`tracking:brands:update:${auth.userId}:${ip}`, 40, 60_000)
+    const rate = await takeRateLimit(`tracking:brands:update:${auth.userId}:${ip}`, 40, 60_000)
     if (!rate.allowed) {
       throw tooManyRequests()
     }
@@ -115,4 +115,3 @@ export async function PATCH(request: NextRequest) {
     return toErrorResponse("api/tracking/brands:patch", error, "Unable to update brand.")
   }
 }
-

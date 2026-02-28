@@ -3,6 +3,14 @@
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 
+import {
+  ACTIVE_PLATFORMS,
+  PLATFORM_FILTERS,
+  PLATFORM_LABELS,
+  platformPillClass,
+  type ActivePlatform,
+  type PlatformFilter,
+} from "@/lib/platforms"
 import { PLAN_CONFIG, type PlanId } from "@/lib/plans"
 import {
   ensureProfile,
@@ -19,11 +27,8 @@ import {
   type SessionData,
 } from "@/lib/supabase-lite"
 
-type Platform = "reddit" | "hackernews" | "devto"
-type PlatformFilter = "all" | Platform
-
 type Mention = {
-  platform: Platform
+  platform: ActivePlatform
   externalId: string
   url: string
   title: string
@@ -36,14 +41,7 @@ type Mention = {
 
 type MentionsApiResponse = {
   fetchedAt: string
-  sourceErrors: string[]
   mentions: Mention[]
-}
-
-const PLATFORM_LABELS: Record<Platform, string> = {
-  reddit: "Reddit",
-  hackernews: "Hacker News",
-  devto: "Dev.to",
 }
 
 function cleanInput(input: string): string {
@@ -64,16 +62,6 @@ function formatTime(isoTime: string): string {
   }).format(date)
 }
 
-function getPlatformPillClass(platform: Platform): string {
-  if (platform === "reddit") {
-    return "bg-orange-100 text-orange-900"
-  }
-  if (platform === "hackernews") {
-    return "bg-amber-100 text-amber-900"
-  }
-  return "bg-blue-100 text-blue-900"
-}
-
 export default function DashboardPage() {
   const [session, setSession] = useState<SessionData | null>(null)
   const [plan, setPlan] = useState<PlanId>("starter_9")
@@ -86,16 +74,14 @@ export default function DashboardPage() {
   const [keywordRows, setKeywordRows] = useState<KeywordRow[]>([])
 
   const [activePlatform, setActivePlatform] = useState<PlatformFilter>("all")
-  const [enabledPlatforms, setEnabledPlatforms] = useState<Record<Platform, boolean>>({
-    reddit: true,
-    hackernews: true,
-    devto: true,
-  })
+  const [enabledPlatforms, setEnabledPlatforms] = useState<Record<ActivePlatform, boolean>>(() =>
+    Object.fromEntries(ACTIVE_PLATFORMS.map((platform) => [platform, true])) as Record<
+      ActivePlatform,
+      boolean
+    >,
+  )
 
   const [mentions, setMentions] = useState<Mention[]>([])
-  const [sourceErrors, setSourceErrors] = useState<string[]>([])
-  const [lastFetchedAt, setLastFetchedAt] = useState<string | null>(null)
-
   const [isLoading, setIsLoading] = useState(true)
   const [isRefreshingMentions, setIsRefreshingMentions] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -144,12 +130,9 @@ export default function DashboardPage() {
   const activeKeywords = useMemo(() => keywordRows.filter((item) => item.is_active), [keywordRows])
 
   const selectedPlatforms = useMemo(
-    () => (Object.entries(enabledPlatforms).filter(([, enabled]) => enabled).map(([platform]) => platform) as Platform[]),
+    () => ACTIVE_PLATFORMS.filter((platform) => enabledPlatforms[platform]),
     [enabledPlatforms],
   )
-
-  const canAddBrand = planConfig.maxBrands === null || activeBrands.length < planConfig.maxBrands
-  const canAddKeyword = activeKeywords.length < planConfig.maxKeywords
 
   const filteredMentions = useMemo(() => {
     if (activePlatform === "all") {
@@ -158,15 +141,18 @@ export default function DashboardPage() {
     return mentions.filter((mention) => mention.platform === activePlatform)
   }, [mentions, activePlatform])
 
-  const counts = useMemo(
-    () => ({
+  const counts = useMemo(() => {
+    const byPlatform = Object.fromEntries(
+      ACTIVE_PLATFORMS.map((platform) => [platform, 0]),
+    ) as Record<ActivePlatform, number>
+    for (const mention of mentions) {
+      byPlatform[mention.platform] += 1
+    }
+    return {
       total: mentions.length,
-      reddit: mentions.filter((mention) => mention.platform === "reddit").length,
-      hackernews: mentions.filter((mention) => mention.platform === "hackernews").length,
-      devto: mentions.filter((mention) => mention.platform === "devto").length,
-    }),
-    [mentions],
-  )
+      byPlatform,
+    }
+  }, [mentions])
 
   async function addBrand() {
     if (!session) {
@@ -182,11 +168,6 @@ export default function DashboardPage() {
     const existing = brandRows.find((brand) => brand.name.toLowerCase() === normalized.toLowerCase())
     if (existing?.is_active) {
       setBrandInput("")
-      return
-    }
-
-    if (!canAddBrand) {
-      setError(`Your ${planConfig.price} plan supports ${planConfig.maxBrands} brand.`)
       return
     }
 
@@ -223,11 +204,6 @@ export default function DashboardPage() {
     const existing = keywordRows.find((keyword) => keyword.query.toLowerCase() === normalized.toLowerCase())
     if (existing?.is_active) {
       setKeywordInput("")
-      return
-    }
-
-    if (!canAddKeyword) {
-      setError(`Your ${planConfig.price} plan supports up to ${planConfig.maxKeywords} keywords.`)
       return
     }
 
@@ -291,11 +267,6 @@ export default function DashboardPage() {
   async function fetchMentions() {
     setError(null)
 
-    if (!activeBrands.length && !activeKeywords.length) {
-      setError("Add at least one brand or keyword to fetch mentions.")
-      return
-    }
-
     if (!selectedPlatforms.length) {
       setError("Enable at least one platform.")
       return
@@ -321,8 +292,6 @@ export default function DashboardPage() {
 
       const payload = (await response.json()) as MentionsApiResponse
       setMentions(payload.mentions)
-      setSourceErrors(payload.sourceErrors ?? [])
-      setLastFetchedAt(payload.fetchedAt)
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : "Failed to fetch mentions")
     } finally {
@@ -330,7 +299,7 @@ export default function DashboardPage() {
     }
   }
 
-  function togglePlatform(platform: Platform) {
+  function togglePlatform(platform: ActivePlatform) {
     setEnabledPlatforms((current) => ({
       ...current,
       [platform]: !current[platform],
@@ -382,7 +351,9 @@ export default function DashboardPage() {
         <section className="grid gap-4 md:grid-cols-2">
           <div className="rounded-2xl border border-border bg-card p-4 sm:p-5">
             <h2 className="text-lg font-semibold text-card-foreground">Current plan</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{planConfig.name} · {planConfig.price}</p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {planConfig.name} · {planConfig.price}
+            </p>
 
             <div className="mt-4 grid grid-cols-2 gap-3">
               <div className="rounded-lg border border-border bg-background px-3 py-3">
@@ -407,9 +378,8 @@ export default function DashboardPage() {
 
           <div className="rounded-2xl border border-border bg-card p-4 sm:p-5">
             <h2 className="text-lg font-semibold text-card-foreground">Platform coverage</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Enable sources to query on refresh.</p>
-            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {(Object.keys(PLATFORM_LABELS) as Platform[]).map((platform) => (
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
+              {ACTIVE_PLATFORMS.map((platform) => (
                 <button
                   key={platform}
                   onClick={() => togglePlatform(platform)}
@@ -449,7 +419,7 @@ export default function DashboardPage() {
               />
               <button
                 onClick={() => void addBrand()}
-                disabled={!canAddBrand || isSaving}
+                disabled={isSaving}
                 className="h-10 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Add brand
@@ -491,7 +461,7 @@ export default function DashboardPage() {
               />
               <button
                 onClick={() => void addKeyword()}
-                disabled={!canAddKeyword || isSaving}
+                disabled={isSaving}
                 className="h-10 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Add keyword
@@ -515,42 +485,28 @@ export default function DashboardPage() {
         <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-card-foreground">Mentions feed</h2>
-              <p className="text-sm text-muted-foreground">
-                Last refresh: {lastFetchedAt ? formatTime(lastFetchedAt) : "Not fetched yet"}
-              </p>
+              <h2 className="text-lg font-semibold text-card-foreground">Mentions</h2>
             </div>
             <button
               onClick={() => void fetchMentions()}
               disabled={isRefreshingMentions}
               className="inline-flex h-10 items-center justify-center rounded-lg bg-accent px-5 text-sm font-semibold text-accent-foreground disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {isRefreshingMentions ? "Refreshing..." : "Refresh mentions"}
+              {isRefreshingMentions ? "Refreshing..." : "Refresh feed"}
             </button>
           </div>
 
           {error ? <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
 
-          {sourceErrors.length ? (
-            <div className="mt-3 rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground">
-              <p className="font-medium text-foreground">Partial source errors</p>
-              <ul className="mt-1 list-disc pl-5">
-                {sourceErrors.map((sourceError) => (
-                  <li key={sourceError}>{sourceError}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
           <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
             <StatCard label="Total" value={counts.total} />
-            <StatCard label="Reddit" value={counts.reddit} />
-            <StatCard label="Hacker News" value={counts.hackernews} />
-            <StatCard label="Dev.to" value={counts.devto} />
+            {ACTIVE_PLATFORMS.map((platform) => (
+              <StatCard key={platform} label={PLATFORM_LABELS[platform]} value={counts.byPlatform[platform]} />
+            ))}
           </div>
 
           <div className="mt-4 flex flex-wrap gap-2">
-            {(["all", "reddit", "hackernews", "devto"] as PlatformFilter[]).map((platform) => (
+            {PLATFORM_FILTERS.map((platform) => (
               <button
                 key={platform}
                 onClick={() => setActivePlatform(platform)}
@@ -569,7 +525,7 @@ export default function DashboardPage() {
             {filteredMentions.map((mention) => (
               <article key={`${mention.platform}:${mention.externalId}`} className="rounded-xl border border-border bg-background p-4">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getPlatformPillClass(mention.platform)}`}>
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${platformPillClass(mention.platform)}`}>
                     {PLATFORM_LABELS[mention.platform]}
                   </span>
                   <span className="text-xs text-muted-foreground">{formatTime(mention.publishedAt)}</span>
@@ -607,7 +563,7 @@ export default function DashboardPage() {
 
           {!filteredMentions.length ? (
             <p className="mt-5 rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              No mentions yet. Add brand/keywords and refresh.
+              No mentions yet.
             </p>
           ) : null}
         </section>

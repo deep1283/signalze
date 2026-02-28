@@ -73,8 +73,6 @@ export default function OnboardingPage() {
     void bootstrap()
   }, [router])
 
-  const canAddBrand = plan.maxBrands === null || brands.length < plan.maxBrands
-  const canAddKeyword = keywords.length < plan.maxKeywords
   const hasRequiredData = useMemo(() => brands.length > 0 && keywords.length > 0, [brands.length, keywords.length])
 
   function addBrand() {
@@ -86,11 +84,6 @@ export default function OnboardingPage() {
 
     if (brands.some((brand) => brand.toLowerCase() === normalized.toLowerCase())) {
       setBrandInput("")
-      return
-    }
-
-    if (!canAddBrand) {
-      setError(`Your ${plan.price} plan supports ${plan.maxBrands} brand.`)
       return
     }
 
@@ -107,11 +100,6 @@ export default function OnboardingPage() {
 
     if (keywords.some((keyword) => keyword.toLowerCase() === normalized.toLowerCase())) {
       setKeywordInput("")
-      return
-    }
-
-    if (!canAddKeyword) {
-      setError(`Your ${plan.price} plan supports up to ${plan.maxKeywords} keywords.`)
       return
     }
 
@@ -195,7 +183,6 @@ export default function OnboardingPage() {
               />
               <button
                 onClick={addBrand}
-                disabled={!canAddBrand}
                 className="h-10 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Add
@@ -238,7 +225,6 @@ export default function OnboardingPage() {
               />
               <button
                 onClick={addKeyword}
-                disabled={!canAddKeyword}
                 className="h-10 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Add

@@ -18,7 +18,7 @@ type LoginBody = {
 export async function POST(request: NextRequest) {
   try {
     const ip = getRequestIp(request)
-    const limit = takeRateLimit(`auth:login:${ip}`, 10, 60_000)
+    const limit = await takeRateLimit(`auth:login:${ip}`, 10, 60_000)
     if (!limit.allowed) {
       throw tooManyRequests()
     }

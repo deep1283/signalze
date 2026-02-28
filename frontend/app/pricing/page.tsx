@@ -102,7 +102,7 @@ export default function PricingPage() {
                   <li>Brands: {plan.maxBrands === null ? "Multiple" : plan.maxBrands}</li>
                   <li>Keywords: {plan.maxKeywords}</li>
                   <li>Free trial: {plan.trialDays} days</li>
-                  <li>Mentions: Reddit, Hacker News, Dev.to</li>
+                  <li>Mentions: Hacker News, Dev.to, GitHub Discussions</li>
                   <li>Notifications: Dashboard + Slack</li>
                 </ul>
 

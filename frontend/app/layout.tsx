@@ -15,8 +15,8 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: 'Mention - Track Your Brand Across Reddit, HN, and Dev.to',
-  description: 'Track brand and niche keyword mentions across Reddit, Hacker News, and Dev.to with plan-aware monitoring.',
+  title: 'Mention - Track Your Brand Across HN, Dev.to, and GitHub Discussions',
+  description: 'Track brand and niche keyword mentions across Hacker News, Dev.to, and GitHub Discussions with plan-aware monitoring.',
 }
 
 export default function RootLayout({
